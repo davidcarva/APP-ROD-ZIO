@@ -25,6 +25,14 @@ export type MatchConfig = {
   food: FoodType;
   playerNames: string[];
   durationMin: number | null; // null = sem limite de tempo
+  blind: boolean; // modo cegueira: placar escondido até o fim
+};
+
+// partida em andamento, salva para não se perder se o app fechar
+export type OngoingMatch = {
+  config: MatchConfig;
+  counts: number[];
+  startedAt: number; // epoch ms
 };
 
 export type PlayerResult = {
@@ -40,6 +48,7 @@ export type MatchRecord = {
   durationSec: number;
   players: PlayerResult[];
   winners: string[];
+  blind?: boolean; // partidas antigas salvas não têm este campo
 };
 
 export function computeWinners(players: PlayerResult[]): string[] {

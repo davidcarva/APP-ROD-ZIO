@@ -1,5 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   Alert,
   Animated,
@@ -10,7 +10,9 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
-import { colors } from './theme';
+import { haptic } from './haptics';
+import { SoundName, useSfx } from './sfx';
+import { Theme, useTheme } from './theme';
 
 const NATIVE = Platform.OS !== 'web';
 
@@ -39,6 +41,7 @@ type BtnProps = {
   onPress: () => void;
   variant?: Variant;
   style?: ViewStyle;
+  sound?: SoundName | null; // som ao tocar (padrão: "bloop"); null = mudo
 };
 
 // bolinhas espalhadas pela borda do cartão (um pouco para dentro, para não cortar)
@@ -85,11 +88,7 @@ function PulseDot({ color, spot }: { color: string; spot: DotSpot }) {
 
   return (
     <Animated.View
-      style={[
-        styles.dot,
-        spot as ViewStyle,
-        { backgroundColor: color, transform: [{ scale }] },
-      ]}
+      style={[fx.dot, spot as ViewStyle, { backgroundColor: color, transform: [{ scale }] }]}
     />
   );
 }
@@ -97,7 +96,7 @@ function PulseDot({ color, spot }: { color: string; spot: DotSpot }) {
 // camada de bolinhas pulsantes para a borda dos cartões dos jogadores
 export function BorderDots({ color }: { color: string }) {
   return (
-    <View style={styles.dotLayer} pointerEvents="none">
+    <View style={fx.dotLayer} pointerEvents="none">
       {DOT_SPOTS.map((spot, i) => (
         <PulseDot key={i} color={color} spot={spot} />
       ))}
@@ -105,97 +104,112 @@ export function BorderDots({ color }: { color: string }) {
   );
 }
 
-export function Btn({ label, onPress, variant = 'primary', style }: BtnProps) {
+export function Btn({ label, onPress, variant = 'primary', style, sound = 'click' }: BtnProps) {
+  const t = useTheme();
+  const s = useMemo(() => makeBtnStyles(t), [t]);
+  const sfx = useSfx();
+  const scale = useRef(new Animated.Value(1)).current;
+  const glossy = variant === 'primary' && t.isDark; // degradê + brilho só no escuro
+
+  // o botão "afunda" ao encostar e volta com mola ao soltar
+  const pressIn = () => {
+    Animated.spring(scale, { toValue: 0.94, friction: 6, tension: 320, useNativeDriver: NATIVE }).start();
+  };
+  const pressOut = () => {
+    Animated.spring(scale, { toValue: 1, friction: 3.5, tension: 220, useNativeDriver: NATIVE }).start();
+  };
+  const press = () => {
+    if (sound) sfx.play(sound, 0.8);
+    haptic.selection();
+    onPress();
+  };
+
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.base,
-        variant === 'ghost' && styles.ghost,
-        variant === 'danger' && styles.dangerBtn,
-        variant === 'primary' && styles.primaryShadow,
-        pressed && styles.pressed,
-        style,
-      ]}
-    >
-      {variant === 'primary' && (
-        <LinearGradient
-          colors={['#ffc961', colors.accent, '#ff8a2a']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFill}
-        />
-      )}
-      {/* filete de brilho interno acompanhando a borda */}
-      <View
+    <Animated.View style={[{ transform: [{ scale }] }, style]}>
+      <Pressable
+        onPressIn={pressIn}
+        onPressOut={pressOut}
+        onPress={press}
         style={[
-          styles.innerStroke,
-          {
-            borderColor:
-              variant === 'primary' ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.08)',
-          },
-        ]}
-      />
-      <Text
-        style={[
-          styles.label,
-          variant === 'primary' && { color: colors.accentText },
-          variant === 'ghost' && { color: colors.text },
-          variant === 'danger' && { color: colors.danger },
+          s.base,
+          variant === 'primary' && s.primary,
+          variant === 'ghost' && s.ghost,
+          variant === 'danger' && s.danger,
         ]}
       >
-        {label}
-      </Text>
-    </Pressable>
+        {glossy && (
+          <LinearGradient
+            colors={['#ffc961', t.accent, '#ff8a2a']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
+        )}
+        {glossy && <View style={s.innerStroke} />}
+        <Text
+          style={[
+            s.label,
+            variant === 'primary' && { color: t.accentText },
+            variant === 'ghost' && { color: t.text },
+            variant === 'danger' && { color: t.danger },
+          ]}
+        >
+          {label}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 
-const styles = StyleSheet.create({
-  base: {
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  primaryShadow: {
-    shadowColor: colors.accent,
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
-  },
-  ghost: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-  },
-  dangerBtn: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.danger,
-  },
-  pressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
-  },
-  innerStroke: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    margin: 3,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    pointerEvents: 'none',
-  },
-  // fonte original dos botões (sistema, em negrito), a pedido do usuário
-  label: {
-    fontSize: 17,
-    fontWeight: '700',
-  },
+const makeBtnStyles = (t: Theme) =>
+  StyleSheet.create({
+    base: {
+      paddingVertical: 16,
+      paddingHorizontal: 24,
+      borderRadius: 18,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    primary: {
+      backgroundColor: t.accent,
+      shadowColor: t.accent,
+      shadowOpacity: t.isDark ? 0.45 : 0.3,
+      shadowRadius: t.isDark ? 14 : 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 8,
+    },
+    ghost: {
+      backgroundColor: t.card,
+      borderWidth: 1,
+      borderColor: t.cardBorder,
+    },
+    danger: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: t.danger,
+    },
+    innerStroke: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      margin: 3,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      borderColor: 'rgba(255,255,255,0.45)',
+      pointerEvents: 'none',
+    },
+    // fonte original dos botões (sistema, em negrito), a pedido do usuário
+    label: {
+      fontSize: 17,
+      fontWeight: '700',
+    },
+  });
+
+// geometria fixa das bolinhas (cor vem por prop)
+const fx = StyleSheet.create({
   dotLayer: {
     position: 'absolute',
     top: 0,
